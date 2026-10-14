@@ -1420,7 +1420,7 @@ async function pageQuestions(el, q, forced) {
   $('#add').onclick = () => qForm();
   $('#tpl').onclick = () => downloadText('question-import-template.csv', QTEMPLATE);
   $('#imp').onclick = () => {
-    const d = modal('Import questions', `<p class="muted small">Columns: <code>category, department, question, option1-4, correct (A-D or 1-4), difficulty, mandatory, explanation</code>.</p><div id="e"></div>
+    const d = modal('Import questions', `<p class="muted small">Columns: <code>category, department, question, option1, option2, option3, option4, correct, difficulty, mandatory, explanation</code>. You can also click <b>CSV template</b> to download a ready-to-use sample.</p><div id="e"></div>
       <input type="file" id="f" accept=".csv,text/csv"><div class="actions"><button class="btn ghost" id="c">Cancel</button><button class="btn gold" id="s">Import</button></div>`);
     $('#c', d).onclick = () => d.close();
     $('#s', d).onclick = async () => {

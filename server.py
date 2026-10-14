@@ -1237,6 +1237,14 @@ def parse_csv(text):
     return rows
 
 
+def _find_val(row, *aliases, default=""):
+    for a in aliases:
+        for k, v in row.items():
+            if k and k.strip().lower() == a.lower():
+                return "" if v is None else str(v).strip()
+    return default
+
+
 @route("POST", "/api/admin/questions/import", auth="admin")
 def q_import(c):
     rows = parse_csv(c.body.get("csv"))
@@ -1244,22 +1252,51 @@ def q_import(c):
     good, errs = [], []
     for i, r in enumerate(rows, start=2):
         try:
-            cat = (r.get("category") or "department").strip().lower()
-            corr = (r.get("correct") or "").strip().upper()
-            corr = "ABCD".index(corr) if corr in list("ABCD") else int(corr) - 1
+            cat = (_find_val(r, "category", "cat", "type") or "department").lower()
             did = None
             if cat == "department":
-                did = depts.get((r.get("department") or "").strip().lower())
+                dept_name = _find_val(r, "department", "dept", "department name", "dept_name")
+                did = depts.get(dept_name.lower())
                 if not did:
-                    raise ApiError(400, "x", f"unknown department '{r.get('department')}'")
+                    raise ApiError(400, "x", f"unknown department '{dept_name}'")
+
+            q_text = _find_val(r, "question", "question text", "question_text", "text", "prompt")
+            opt1 = _find_val(r, "option1", "option 1", "opt1", "option_1", "opt 1", "a", "option a")
+            opt2 = _find_val(r, "option2", "option 2", "opt2", "option_2", "opt 2", "b", "option b")
+            opt3 = _find_val(r, "option3", "option 3", "opt3", "option_3", "opt 3", "c", "option c")
+            opt4 = _find_val(r, "option4", "option 4", "opt4", "option_4", "opt 4", "d", "option d")
+            opts = [opt1, opt2, opt3, opt4]
+
+            raw_corr = _find_val(r, "correct", "correct (a-d or 1-4)", "correct (a-d or 1 - 4)", "correct answer", "correct_answer", "answer", "ans", "correct option", "correct_option", "key")
+            corr = None
+            clean_corr = re.sub(r"^(option|opt)?\s*[\(\[]?([A-Da-d1-4])[\)\]\.]?$", r"\2", raw_corr, flags=re.IGNORECASE).upper()
+            if clean_corr in ("A", "B", "C", "D"):
+                corr = "ABCD".index(clean_corr)
+            elif clean_corr in ("1", "2", "3", "4"):
+                corr = int(clean_corr) - 1
+            else:
+                for idx, o in enumerate(opts):
+                    if raw_corr and o and raw_corr.lower() == o.lower():
+                        corr = idx
+                        break
+            if corr is None:
+                raise ApiError(400, "invalid_correct", f"invalid correct answer '{raw_corr}' (expected A-D or 1-4)")
+
+            diff = (_find_val(r, "difficulty", "diff", "level") or "easy").lower()
+            mand_raw = _find_val(r, "mandatory", "is_mandatory", "mand", "required")
+            mandatory = mand_raw.lower() in ("1", "true", "yes", "y")
+            expl = _find_val(r, "explanation", "expl", "explanation (optional)", "rationale")
+
             good.append(clean_question(c.db, {
-                "category": cat, "dept_id": did, "text": r.get("question"),
-                "opt1": r.get("option1"), "opt2": r.get("option2"), "opt3": r.get("option3"), "opt4": r.get("option4"),
-                "correct": corr, "difficulty": (r.get("difficulty") or "").strip().lower(),
-                "mandatory": (r.get("mandatory") or "0").strip().lower() in ("1", "true", "yes"),
-                "explanation": r.get("explanation") or ""}))
-        except (ApiError, ValueError, TypeError, IndexError) as e:
-            errs.append(f"Row {i}: {e.message if isinstance(e, ApiError) else 'invalid value'}")
+                "category": cat, "dept_id": did, "text": q_text,
+                "opt1": opt1, "opt2": opt2, "opt3": opt3, "opt4": opt4,
+                "correct": corr, "difficulty": diff,
+                "mandatory": mandatory,
+                "explanation": expl}))
+        except ApiError as e:
+            errs.append(f"Row {i}: {e.message}")
+        except Exception as e:
+            errs.append(f"Row {i}: invalid value ({str(e)})")
     if errs:
         raise ApiError(400, "import_failed", "No questions were imported. Fix these rows and try again.", {"errors": errs[:25]})
     with Tx(c.db):
