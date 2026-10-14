@@ -1,0 +1,11 @@
+{
+  "name": "ecell-portal",
+  "version": "1.0.0",
+  "description": "E-Cell Hiring Examination Portal",
+  "scripts": {
+    "dev": "python -u server.py",
+    "start": "python -u server.py",
+    "test": "python -m unittest discover -s tests -v",
+    "demo": "python -u server.py demo"
+  }
+}

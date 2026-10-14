@@ -1,0 +1,3 @@
+# Python 3.10+ standard library application (Zero mandatory external dependencies)
+# Optional performance packages for high-scale PostgreSQL/WSGI if desired:
+# psycopg2-binary>=2.9.9

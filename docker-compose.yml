@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  ecell-backend:
+    build: .
+    container_name: ecell_backend
+    restart: always
+    environment:
+      - ECELL_HOST=0.0.0.0
+      - ECELL_PORT=8000
+      - ECELL_TRUST_PROXY=1
+      - ECELL_COOKIE_SECURE=1
+      - ECELL_SESSION_HOURS=4
+      - ECELL_ADMIN_SETUP_CODE=Ecell@Hirings2026!
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/public/exam"]
+      interval: 15s
+      timeout: 3s
+      retries: 3

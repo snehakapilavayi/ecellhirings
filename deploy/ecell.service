@@ -1,0 +1,35 @@
+[Unit]
+Description=E-Cell Hiring Examination Portal Backend
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/ecell-portal
+
+# Load environment configuration
+EnvironmentFile=/var/www/ecell-portal/deploy/production.env
+
+# Execution command
+ExecStart=/usr/bin/python3 /var/www/ecell-portal/server.py
+
+# High Concurrency OS limits
+LimitNOFILE=65535
+
+# Auto-recovery: restarts process immediately if it ever exits or crashes
+Restart=always
+RestartSec=3
+
+# Security hardening
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/www/ecell-portal/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ecell-portal
+
+[Install]
+WantedBy=multi-user.target
