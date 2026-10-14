@@ -1484,14 +1484,41 @@ def applicant_validate_csv(c):
             invalid_rows.append(row_summary)
         else:
             valid_rows.append(row_summary)
+    all_rows = []
+    for row in valid_rows:
+        all_rows.append({
+            "row": row["row_num"],
+            "name": row["name"],
+            "email": row["email"],
+            "mobile": row["mobile"],
+            "departments": "; ".join(row["departments"]) if isinstance(row["departments"], list) else row["departments"],
+            "temporary_password": row["temporary_password"],
+            "is_existing": row["is_existing"],
+            "valid": True,
+            "errors": []
+        })
+    for row in invalid_rows:
+        all_rows.append({
+            "row": row["row_num"],
+            "name": row["name"],
+            "email": row["email"],
+            "mobile": row["mobile"],
+            "departments": "; ".join(row["departments"]) if isinstance(row["departments"], list) else row["departments"],
+            "temporary_password": row["temporary_password"],
+            "is_existing": row["is_existing"],
+            "valid": False,
+            "errors": row["errors"]
+        })
+    all_rows.sort(key=lambda r: r["row"])
     return {
-        "total": len(rows),
-        "valid_count": len(valid_rows),
-        "invalid_count": len(invalid_rows),
-        "valid_rows": valid_rows[:500],
-        "invalid_rows": invalid_rows,
-        "duplicate_emails": list(duplicate_emails),
-        "existing_emails": [r["email"] for r in valid_rows if r["is_existing"]]
+        "summary": {
+            "total_rows": len(rows),
+            "valid_count": len(valid_rows),
+            "invalid_count": len(invalid_rows),
+            "duplicate_emails": len(duplicate_emails),
+            "existing_emails": len([r for r in valid_rows if r["is_existing"]])
+        },
+        "rows": all_rows
     }
 
 
