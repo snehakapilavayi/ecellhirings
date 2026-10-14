@@ -1258,6 +1258,15 @@ def q_import(c):
                 dept_name = _find_val(r, "department", "dept", "department name", "dept_name")
                 did = depts.get(dept_name.lower())
                 if not did:
+                    norm1 = re.sub(r"\s*&\s*", " and ", dept_name.lower())
+                    norm2 = re.sub(r"\s+and\s+", " & ", dept_name.lower())
+                    for dname, d_id in depts.items():
+                        dn_norm1 = re.sub(r"\s*&\s*", " and ", dname.lower())
+                        dn_norm2 = re.sub(r"\s+and\s+", " & ", dname.lower())
+                        if dn_norm1 in (norm1, norm2) or dn_norm2 in (norm1, norm2):
+                            did = d_id
+                            break
+                if not did:
                     raise ApiError(400, "x", f"unknown department '{dept_name}'")
 
             q_text = _find_val(r, "question", "question text", "question_text", "text", "prompt")
