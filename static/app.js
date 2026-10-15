@@ -1463,6 +1463,7 @@ async function pageQuestions(el, q, forced) {
         syncQBtn.textContent = 'Sync Cloud';
       }
     };
+  }
   ['fc', 'fd', 'ff', 'fa'].forEach(i => { if ($('#' + i)) $('#' + i).onchange = load; });
   $('#fq').oninput = () => { clearTimeout(load.t); load.t = setTimeout(load, 250); };
   load();
