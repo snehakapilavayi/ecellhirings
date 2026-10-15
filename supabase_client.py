@@ -234,26 +234,119 @@ def sync_violation_to_supabase(user_email, kind):
 # Full Database Push
 # ------------------------------------------------------------------------------
 
-def full_push(db):
-    """Pushes all SQLite departments, questions, users, and results to Supabase."""
-    stats = {"questions": 0, "users": 0, "results": 0}
-    
-    # 1. Sync all active questions
-    dept_rows = {d["id"]: d["name"] for d in db.execute("SELECT id, name FROM departments").fetchall()}
-    q_rows = db.execute("SELECT * FROM questions WHERE active=1").fetchall()
-    for q in q_rows:
-        dept_name = dept_rows.get(q["dept_id"])
-        res = sync_question_to_supabase(dict(q), dept_name)
-        if res:
+def pull_from_supabase(db):
+    """Pulls departments and questions from Supabase into SQLite database."""
+    stats = {"departments": 0, "questions": 0}
+    now = int(time.time())
+    try:
+        # 1. Sync departments
+        sb_depts = api_request("GET", "departments?select=id,name")
+        local_depts = {r["name"].lower(): r["id"] for r in db.execute("SELECT id, name FROM departments").fetchall()}
+        sb_dept_id_to_local_name = {}
+
+        for d in sb_depts:
+            d_id = d.get("id")
+            d_name = d.get("name")
+            if not d_name:
+                continue
+            sb_dept_id_to_local_name[d_id] = d_name
+            dname_lower = d_name.lower()
+            if dname_lower not in local_depts:
+                cur = db.execute("INSERT INTO departments(name, created_at) VALUES(?, ?)", (d_name, now))
+                local_depts[dname_lower] = cur.lastrowid
+                stats["departments"] += 1
+
+        # 2. Sync questions
+        sb_questions = api_request("GET", "questions?select=*")
+        local_questions = {r["text"].strip().lower() for r in db.execute("SELECT text FROM questions").fetchall()}
+
+        for q in sb_questions:
+            prompt = (q.get("prompt") or "").strip()
+            if not prompt or prompt.lower() in local_questions:
+                continue
+
+            options = q.get("options") or ["", "", "", ""]
+            while len(options) < 4:
+                options.append("")
+            opt1, opt2, opt3, opt4 = options[0], options[1], options[2], options[3]
+            correct = q.get("correct_index", 0)
+            difficulty = q.get("difficulty", "medium")
+            is_ent = bool(q.get("is_entrepreneurship", False))
+            active = 1 if q.get("is_active", True) else 0
+
+            if is_ent:
+                cat = "entrepreneurship"
+                dept_id = None
+            else:
+                cat = "department"
+                dept_name = sb_dept_id_to_local_name.get(q.get("department_id"), "")
+                dept_id = local_depts.get(dept_name.lower()) if dept_name else None
+                if not dept_id:
+                    dept_id = next(iter(local_depts.values()), None)
+
+            db.execute(
+                """INSERT INTO questions(category, dept_id, text, opt1, opt2, opt3, opt4, correct, difficulty, active, mandatory, explanation, created_at)
+                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cat, dept_id, prompt, opt1, opt2, opt3, opt4, correct, difficulty, active, 0, "", now)
+            )
+            local_questions.add(prompt.lower())
             stats["questions"] += 1
 
-    # 2. Sync all users
-    u_rows = db.execute("SELECT * FROM users WHERE active=1").fetchall()
-    for u in u_rows:
-        dept_name = dept_rows.get(u["dept_id"])
-        res = sync_profile_to_supabase(dict(u), dept_name)
-        if res:
-            stats["users"] += 1
+        return {"ok": True, "stats": stats}
+    except Exception as e:
+        if os.environ.get("ECELL_VERBOSE"):
+            print(f"[Supabase Pull Error] {e}")
+        return {"ok": False, "error": str(e), "stats": stats}
+
+
+def full_push(db):
+    """Pushes all SQLite departments, questions, users, and results to Supabase."""
+    stats = {"departments": 0, "questions": 0, "users": 0, "results": 0}
+
+    # 1. Departments
+    dept_map = get_supabase_dept_map(force=True)
+    local_depts = db.execute("SELECT id, name FROM departments").fetchall()
+    missing_depts = [d["name"] for d in local_depts if d["name"] not in dept_map]
+    if missing_depts:
+        try:
+            api_request("POST", "departments", [{"name": d, "is_active": True} for d in missing_depts])
+            dept_map = get_supabase_dept_map(force=True)
+            stats["departments"] = len(missing_depts)
+        except Exception:
+            pass
+
+    # 2. Bulk push active questions
+    try:
+        dept_rows = {d["id"]: d["name"] for d in local_depts}
+        ent_dept_id = dept_map.get("Entrepreneurship")
+        existing_prompts = {q["prompt"] for q in api_request("GET", "questions?select=prompt")}
+        q_rows = db.execute("SELECT * FROM questions WHERE active=1").fetchall()
+        to_insert = []
+        for q in q_rows:
+            if q["text"] in existing_prompts:
+                continue
+            dept_name = dept_rows.get(q["dept_id"])
+            sb_dept_id = dept_map.get(dept_name) or ent_dept_id
+            to_insert.append({
+                "department_id": sb_dept_id,
+                "prompt": q["text"],
+                "options": [q["opt1"], q["opt2"], q["opt3"], q["opt4"]],
+                "correct_index": q["correct"],
+                "difficulty": q["difficulty"] or "medium",
+                "is_entrepreneurship": (q["category"] == "entrepreneurship"),
+                "is_active": bool(q["active"])
+            })
+        for i in range(0, len(to_insert), 50):
+            batch = to_insert[i:i + 50]
+            try:
+                res = api_request("POST", "questions", batch)
+                stats["questions"] += len(res) if res else len(batch)
+            except Exception as e:
+                if os.environ.get("ECELL_VERBOSE"):
+                    print(f"[Supabase Push Error: Questions Batch] {e}")
+    except Exception as e:
+        if os.environ.get("ECELL_VERBOSE"):
+            print(f"[Supabase Push Error: Questions Query] {e}")
 
     # 3. Sync finalized attempts
     att_rows = db.execute("""
@@ -280,3 +373,4 @@ if __name__ == "__main__":
         print(f"[OK] Connected successfully to Supabase! Found {res['departments_count']} department(s).")
     else:
         print(f"[-] Supabase connection failed: {res['error']}")
+

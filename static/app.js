@@ -1008,6 +1008,7 @@ async function pageApplicants(el) {
       <a class="btn" href="/api/admin/applicants.csv">Export CSV</a>
       <a class="btn" href="/api/admin/applicants/template.csv">CSV Template</a>
       <button class="btn" id="imp">Import CSV Wizard</button>
+      <button class="btn" id="sb_sync_app" title="Sync applicants and questions with Supabase cloud">Sync Cloud</button>
       <button class="btn gold" id="add">Add applicant</button>
     </div>
   </div>
@@ -1036,6 +1037,24 @@ async function pageApplicants(el) {
   };
   $('#fd').onchange = $('#fa').onchange = load;
   $('#fq').oninput = () => { clearTimeout(load.t); load.t = setTimeout(load, 250); };
+
+  const syncAppBtn = $('#sb_sync_app');
+  if (syncAppBtn) {
+    syncAppBtn.onclick = async () => {
+      syncAppBtn.disabled = true;
+      syncAppBtn.textContent = 'Syncing…';
+      try {
+        await api('/api/admin/supabase/sync', { method: 'POST', body: {} });
+        toast('Cloud sync complete!');
+        await load();
+      } catch (e) {
+        toast('Sync failed: ' + (e.message || e), true);
+      } finally {
+        syncAppBtn.disabled = false;
+        syncAppBtn.textContent = 'Sync Cloud';
+      }
+    };
+  }
 
   $('#add').onclick = () => {
     const d = modal('Add applicant', `<div id="e"></div>
@@ -1355,7 +1374,7 @@ async function pageQuestions(el, q, forced) {
   const depts = (await api('/api/admin/departments')).departments;
   const cfg = forced ? (await api('/api/admin/config')).config : null;
   el.innerHTML = `<div class="pagehead"><h1>${forced ? 'Entrepreneurship questions' : 'Question bank'}</h1>
-    <div><button class="btn" id="tpl">CSV template</button> <button class="btn" id="imp">Import CSV</button> <button class="btn gold" id="add">Add question</button></div></div>
+    <div><button class="btn" id="tpl">CSV template</button> <button class="btn" id="imp">Import CSV</button> <button class="btn" id="sb_sync_q" title="Sync questions with Supabase cloud">Sync Cloud</button> <button class="btn gold" id="add">Add question</button></div></div>
   <div id="mstat"></div>
   <div class="filters">
     ${forced ? '' : `<select id="fc" aria-label="Category"><option value="">All categories</option><option value="department">Department</option><option value="entrepreneurship">Entrepreneurship</option></select>
@@ -1428,6 +1447,22 @@ async function pageQuestions(el, q, forced) {
       catch (e) { $('#e', d).innerHTML = errBox(e); }
     };
   };
+  const syncQBtn = $('#sb_sync_q');
+  if (syncQBtn) {
+    syncQBtn.onclick = async () => {
+      syncQBtn.disabled = true;
+      syncQBtn.textContent = 'Syncing…';
+      try {
+        await api('/api/admin/supabase/sync', { method: 'POST', body: {} });
+        toast('Cloud sync complete!');
+        await load();
+      } catch (e) {
+        toast('Sync failed: ' + (e.message || e), true);
+      } finally {
+        syncQBtn.disabled = false;
+        syncQBtn.textContent = 'Sync Cloud';
+      }
+    };
   ['fc', 'fd', 'ff', 'fa'].forEach(i => { if ($('#' + i)) $('#' + i).onchange = load; });
   $('#fq').oninput = () => { clearTimeout(load.t); load.t = setTimeout(load, 250); };
   load();

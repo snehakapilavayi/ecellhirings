@@ -240,7 +240,70 @@ def init_db():
                    (DEFAULT_INSTRUCTIONS, now, now))
         db.execute("""INSERT OR IGNORE INTO applicant_departments(user_id, dept_id, created_at)
                       SELECT id, dept_id, created_at FROM users WHERE dept_id IS NOT NULL AND role='applicant'""")
+
+    # Auto-sync questions and departments from Supabase if questions table is empty
+    try:
+        q_count = db.execute("SELECT COUNT(*) FROM questions").fetchone()[0]
+        if q_count == 0:
+            print("[Init] Questions table is empty. Attempting auto-pull from Supabase...")
+            res = supabase_client.pull_from_supabase(db)
+            print(f"[Init] Supabase auto-pull result: {res}")
+    except Exception as e:
+        print(f"[Init] Supabase auto-pull notice: {e}")
+
+    # Auto-seed applicants if applicants table is empty and seed file exists
+    try:
+        app_count = db.execute("SELECT COUNT(*) FROM users WHERE role='applicant'").fetchone()[0]
+        if app_count == 0:
+            seed_paths = [
+                os.path.join(BASE, "data", "seed_applicants.csv"),
+                os.path.join(BASE, "seed_applicants.csv"),
+                os.path.join(BASE, "deploy", "seed_applicants.csv"),
+            ]
+            for sp in seed_paths:
+                if os.path.isfile(sp):
+                    print(f"[Init] Auto-importing seed applicants from {sp}...")
+                    _auto_import_applicants_csv(db, sp)
+                    break
+    except Exception as e:
+        print(f"[Init] Seed applicants auto-import notice: {e}")
+
     db.close()
+
+
+def _auto_import_applicants_csv(db, path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        depts = {r["name"].lower(): r["id"] for r in db.execute("SELECT id, name FROM departments").fetchall()}
+        now = int(time.time())
+        for r in rows:
+            name = (r.get("name") or "").strip()
+            email = (r.get("email") or "").strip().lower()
+            pw = (r.get("temporary_password") or r.get("password") or "ECELL@VITB").strip()
+            mobile = re.sub(r"\D", "", str(r.get("mobile") or ""))
+            dept_str = (r.get("departments") or r.get("department") or "").strip()
+            if not email or not name:
+                continue
+            dept_names = [d.strip() for d in re.split(r"[;,]", dept_str) if d.strip()]
+            dids = [depts[dn.lower()] for dn in dept_names if dn.lower() in depts]
+            primary_did = dids[0] if dids else (next(iter(depts.values()), None) if depts else None)
+            salt, h = hash_pw(pw)
+            with Tx(db):
+                cur = db.execute(
+                    "INSERT OR IGNORE INTO users(email,name,role,pw_salt,pw_hash,dept_id,mobile,contact_email,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (email, name, "applicant", salt, h, primary_did, mobile, email, now)
+                )
+                existing = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+                uid = existing["id"] if existing else cur.lastrowid
+                for did in dids:
+                    db.execute("INSERT OR IGNORE INTO applicant_departments(user_id,dept_id,created_at) VALUES(?,?,?)", (uid, did, now))
+                if mobile:
+                    db.execute("INSERT OR REPLACE INTO applicant_contacts(user_id,contact_email,mobile,updated_at) VALUES(?,?,?,?)", (uid, email, mobile, now))
+        print(f"[Init] Successfully imported applicants from {path}")
+    except Exception as e:
+        print(f"[Init] Failed to import applicants from {path}: {e}")
 
 
 class Tx:
@@ -1845,11 +1908,26 @@ def supabase_status(c):
     return supabase_client.test_connection()
 
 
+@route("POST", "/api/admin/supabase/pull", auth="admin")
+def supabase_pull_api(c):
+    res = supabase_client.pull_from_supabase(c.db)
+    log_audit(c.db, c.user["id"], "supabase_pull", f"Pulled from Supabase: {res}", c.ip)
+    return res
+
+
+@route("POST", "/api/admin/supabase/push", auth="admin")
+def supabase_push_api(c):
+    stats = supabase_client.full_push(c.db)
+    log_audit(c.db, c.user["id"], "supabase_push", f"Pushed to Supabase: {stats}", c.ip)
+    return {"ok": True, "stats": stats}
+
+
 @route("POST", "/api/admin/supabase/sync", auth="admin")
 def supabase_sync_api(c):
-    stats = supabase_client.full_push(c.db)
-    log_audit(c.db, c.user["id"], "supabase_sync", f"Synced: {stats}", c.ip)
-    return {"ok": True, "stats": stats}
+    pull_res = supabase_client.pull_from_supabase(c.db)
+    push_stats = supabase_client.full_push(c.db)
+    log_audit(c.db, c.user["id"], "supabase_sync", f"Pull: {pull_res}, Push: {push_stats}", c.ip)
+    return {"ok": True, "pull": pull_res, "push": push_stats}
 
 
 @route("GET", "/api/admin/attempts/<id>", auth="admin")
